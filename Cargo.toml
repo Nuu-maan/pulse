@@ -2,9 +2,20 @@
 name = "pulse"
 version = "0.1.0"
 edition = "2024"
+description = "Render a git repository's history as a self-contained animated SVG"
+repository = "https://github.com/nuu-maan/pulse"
+license = "MIT"
+readme = "README.md"
+keywords = ["git", "svg", "visualisation", "history", "readme"]
+categories = ["command-line-utilities", "visualization"]
+exclude = ["docs/*"]
 
 [dependencies]
 anyhow = "1.0.104"
 chrono = "0.4.45"
 clap = { version = "4.6.6", features = ["derive"] }
 git2 = "0.21.0"
+
+[profile.release]
+lto = true
+strip = true
