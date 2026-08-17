@@ -83,9 +83,11 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         graph_bottom + 20.0
     };
 
+    let legend_on = o.color_by == ColorBy::Author && n > 0;
+
     let g = Geometry {
         w,
-        h: rule_y + 26.0,
+        h: rule_y + if legend_on { 42.0 } else { 26.0 },
         pad,
         dx,
         dy,
@@ -313,6 +315,57 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         }
     }
 
+    let mut legend = String::new();
+    if legend_on {
+        let mut seen: Vec<(String, String, usize)> = Vec::new();
+        for c in &h.commits {
+            let key = c.email.to_lowercase();
+            match seen.iter_mut().find(|(k, _, _)| *k == key) {
+                Some((_, _, n)) => *n += 1,
+                None => seen.push((key, c.author.clone(), 1)),
+            }
+        }
+        seen.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
+        let shown = seen.len().min(6);
+        let hidden = seen.len() - shown;
+
+        let width_of = |name: &str| 9.0 + 5.6 * name.chars().count() as f64 + 14.0;
+        let mut total: f64 = seen[..shown].iter().map(|(_, name, _)| width_of(name)).sum();
+        let more = if hidden > 0 {
+            format!("+{hidden} more")
+        } else {
+            String::new()
+        };
+        if hidden > 0 {
+            total += 5.6 * more.chars().count() as f64 + 14.0;
+        }
+
+        let mut lx = (g.w - g.pad - total).max(g.pad);
+        let ly = g.rule_y + 30.0;
+        for (key, name, _) in &seen[..shown] {
+            let c = hash(key) % 8;
+            let _ = write!(
+                legend,
+                r#"<circle class="key c{c}" cx="{}" cy="{}" r="3.2"/><text class="keyt" x="{}" y="{}">{}</text>"#,
+                f(lx + 3.5),
+                f(ly - 3.2),
+                f(lx + 10.0),
+                f(ly),
+                esc(name)
+            );
+            lx += width_of(name);
+        }
+        if hidden > 0 {
+            let _ = write!(
+                legend,
+                r#"<text class="keyt muted" x="{}" y="{}">{}</text>"#,
+                f(lx),
+                f(ly),
+                esc(&more)
+            );
+        }
+    }
+
     let mut axis = String::new();
     let _ = write!(
         axis,
@@ -416,7 +469,7 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
     );
 
     let svg = format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {hh}" width="{w}" height="{hh}" role="img" aria-label="{label}"><title>{label}</title><style>{css}</style><rect class="bg" width="{w}" height="{hh}" rx="8"/>{axis}{playhead}<g class="wave">{bars}</g><g class="edges">{edges}</g><g class="nodes">{nodes}</g>{labels}{header}</svg>"##,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {hh}" width="{w}" height="{hh}" role="img" aria-label="{label}"><title>{label}</title><style>{css}</style><rect class="bg" width="{w}" height="{hh}" rx="8"/>{axis}{playhead}<g class="wave">{bars}</g><g class="edges">{edges}</g><g class="nodes">{nodes}</g>{labels}{legend}{header}</svg>"##,
         w = f(g.w),
         hh = f(g.h),
         label = esc(&label),
@@ -472,6 +525,9 @@ fn stylesheet(
          .sub{{font-size:11px;fill:var(--muted)}}\
          .branch{{font-family:{MONO};font-size:11px;fill:var(--muted);text-anchor:end}}\
          .axist{{font-size:9px;fill:var(--muted);text-anchor:middle}}\
+         .key{{fill:var(--c)}}\
+         .keyt{{font-size:9.5px;fill:var(--fg)}}\
+         .muted{{fill:var(--muted)}}\
          .rule{{stroke:var(--grid);stroke-width:1}}\
          .tick{{stroke:var(--grid);stroke-width:1;stroke-dasharray:2 4}}\
          .e{{fill:none;stroke:var(--c);stroke-width:1.9;stroke-linecap:round}}\
