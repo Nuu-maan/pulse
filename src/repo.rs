@@ -97,8 +97,11 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
             walk.push(obj.peel_to_commit()?.id())?;
         }
         (None, true) => {
-            walk.push_glob("refs/heads/*")?;
+            let _ = walk.push_glob("refs/heads/*");
             let _ = walk.push_glob("refs/tags/*");
+            if repo.head().is_ok() {
+                let _ = walk.push_head();
+            }
         }
         (None, false) => {
             if repo.head().is_ok() {
