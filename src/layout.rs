@@ -110,3 +110,92 @@ fn alloc(slots: &mut Vec<Option<String>>) -> usize {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn commit(id: &str, parents: &[&str]) -> Commit {
+        Commit {
+            id: id.into(),
+            short: id.into(),
+            parents: parents.iter().map(|p| p.to_string()).collect(),
+            author: "Test".into(),
+            email: "test@example.com".into(),
+            time: 0,
+            summary: String::new(),
+            refs: Vec::new(),
+            ins: 0,
+            del: 0,
+        }
+    }
+
+    fn chain(ids: &[&str]) -> Vec<Commit> {
+        ids.iter()
+            .enumerate()
+            .map(|(i, id)| {
+                if i == 0 {
+                    commit(id, &[])
+                } else {
+                    commit(id, &[ids[i - 1]])
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn linear_history_stays_on_one_lane() {
+        let l = compute(&chain(&["a", "b", "c", "d"]));
+        assert_eq!(l.lanes, 1);
+        assert_eq!(l.lane_of, vec![0, 0, 0, 0]);
+        assert_eq!(l.edges.len(), 3);
+    }
+
+    #[test]
+    fn a_branch_and_merge_take_two_lanes() {
+        let commits = vec![
+            commit("a", &[]),
+            commit("b", &["a"]),
+            commit("f", &["a"]),
+            commit("m", &["b", "f"]),
+        ];
+        let l = compute(&commits);
+        assert_eq!(l.lanes, 2);
+        assert_eq!(l.lane_of[3], 0, "the merge belongs on the trunk");
+        assert_eq!(l.edges.len(), 4);
+    }
+
+    #[test]
+    fn a_parent_outside_the_window_becomes_a_stub() {
+        let commits = vec![commit("b", &["a"]), commit("c", &["b"])];
+        let l = compute(&commits);
+        let stubs = l.edges.iter().filter(|e| e.parent.is_none()).count();
+        assert_eq!(stubs, 1);
+    }
+
+    #[test]
+    fn the_busiest_lane_is_promoted_to_the_top() {
+        let mut commits = chain(&["root", "m1", "m2", "m3", "m4", "m5"]);
+        commits.push(commit("f1", &["m1"]));
+        let l = compute(&commits);
+
+        assert_eq!(l.lanes, 2);
+
+        let mut counts = vec![0usize; l.lanes];
+        for &lane in &l.lane_of {
+            counts[lane] += 1;
+        }
+        assert!(
+            counts[0] > counts[1],
+            "the top lane should be the busiest, got {counts:?}"
+        );
+        assert_eq!(l.lane_of[6], 1, "the side branch sits below the trunk");
+    }
+
+    #[test]
+    fn an_empty_history_does_not_panic() {
+        let l = compute(&[]);
+        assert_eq!(l.lanes, 1);
+        assert!(l.edges.is_empty());
+    }
+}
