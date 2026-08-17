@@ -567,6 +567,11 @@ fn stylesheet(
         x1 = f(g.w - g.pad)
     );
 
+    let _ = write!(
+        s,
+        "@media(prefers-reduced-motion:reduce){{.n,.e,.lbl,.bar{{animation:none!important}}.ph,.hp{{display:none}}}}"
+    );
+
     s
 }
 
