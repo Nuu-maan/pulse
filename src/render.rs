@@ -375,6 +375,24 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         f(g.w - g.pad + 10.0),
         f(g.rule_y)
     );
+    let mut taken: Vec<f64> = Vec::new();
+    for (i, gap) in quiet_spells(h) {
+        let cx = x(i) - g.dx / 2.0;
+        if taken.iter().any(|t| (t - cx).abs() < 40.0) {
+            continue;
+        }
+        taken.push(cx);
+        let _ = write!(
+            axis,
+            r#"<line class="gap" x1="{0}" y1="{1}" x2="{0}" y2="{2}"/><text class="axist" x="{0}" y="{3}">{4}</text>"#,
+            f(cx),
+            f(g.top - 12.0),
+            f(g.rule_y),
+            f(g.rule_y + 14.0),
+            esc(&span_label(gap))
+        );
+    }
+
     let mut last_tick = f64::NEG_INFINITY;
     let mut prev: Option<(i32, u32)> = None;
     for i in 0..n {
@@ -387,10 +405,11 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
             continue;
         }
         let cx = x(i);
-        if cx - last_tick < 44.0 {
+        if cx - last_tick < 44.0 || taken.iter().any(|t| (t - cx).abs() < 40.0) {
             continue;
         }
         last_tick = cx;
+        taken.push(cx);
         let label = if dt.month() == 1 {
             dt.format("%b %Y").to_string()
         } else {
@@ -530,6 +549,7 @@ fn stylesheet(
          .muted{{fill:var(--muted)}}\
          .rule{{stroke:var(--grid);stroke-width:1}}\
          .tick{{stroke:var(--grid);stroke-width:1;stroke-dasharray:2 4}}\
+         .gap{{stroke:var(--muted);stroke-width:1;stroke-dasharray:1 5;opacity:.5}}\
          .e{{fill:none;stroke:var(--c);stroke-width:1.9;stroke-linecap:round}}\
          .stub{{stroke-dasharray:2 3;opacity:.35}}\
          .n{{fill:var(--c);stroke:var(--bg);stroke-width:var(--nw)}}\
@@ -636,6 +656,41 @@ fn stylesheet(
 
 fn stamp(t: i64) -> DateTime<Utc> {
     DateTime::from_timestamp(t, 0).unwrap_or_default()
+}
+
+fn quiet_spells(h: &History) -> Vec<(usize, i64)> {
+    if h.commits.len() < 4 {
+        return Vec::new();
+    }
+    let gaps: Vec<i64> = h
+        .commits
+        .windows(2)
+        .map(|w| (w[1].time - w[0].time).max(0))
+        .collect();
+    let mut sorted = gaps.clone();
+    sorted.sort_unstable();
+    let median = sorted[sorted.len() / 2].max(1);
+    let floor = (7 * 86_400).max(median * 4);
+
+    let mut out: Vec<(usize, i64)> = gaps
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| **g >= floor)
+        .map(|(i, g)| (i + 1, *g))
+        .collect();
+    out.sort_by_key(|(_, g)| std::cmp::Reverse(*g));
+    out.truncate(8);
+    out
+}
+
+fn span_label(secs: i64) -> String {
+    let days = secs / 86_400;
+    match days {
+        0..=13 => format!("{days}d"),
+        14..=59 => format!("{}w", days / 7),
+        60..=729 => format!("{}mo", days / 30),
+        _ => format!("{}y", days / 365),
+    }
 }
 
 fn churn_cap(h: &History) -> f64 {
