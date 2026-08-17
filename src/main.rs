@@ -19,10 +19,20 @@ struct Cli {
     #[arg(default_value = ".")]
     path: PathBuf,
 
-    #[arg(short, long, default_value = "pulse.svg", help = "Output file, or - for stdout")]
+    #[arg(
+        short,
+        long,
+        default_value = "pulse.svg",
+        help = "Output file, or - for stdout"
+    )]
     out: String,
 
-    #[arg(short = 'n', long, default_value_t = 140, help = "Most recent commits to include")]
+    #[arg(
+        short = 'n',
+        long,
+        default_value_t = 140,
+        help = "Most recent commits to include"
+    )]
     max: usize,
 
     #[arg(long, help = "Only commits newer than this (30d, 6mo, 2y, 2026-01-01)")]
@@ -46,7 +56,12 @@ struct Cli {
     #[arg(long, default_value_t = 1200.0, help = "Target width in pixels")]
     width: f64,
 
-    #[arg(short, long, default_value_t = 9.0, help = "Animation length in seconds")]
+    #[arg(
+        short,
+        long,
+        default_value_t = 9.0,
+        help = "Animation length in seconds"
+    )]
     duration: f64,
 
     #[arg(long, help = "Play the animation once instead of looping")]
@@ -96,10 +111,10 @@ fn main() -> Result<()> {
 
     let since = cli.since.as_deref().map(parse_time).transpose()?;
     let until = cli.until.as_deref().map(parse_time).transpose()?;
-    if let (Some(a), Some(b)) = (since, until) {
-        if a > b {
-            bail!("--since is newer than --until, so no commit can match");
-        }
+    if let (Some(a), Some(b)) = (since, until)
+        && a > b
+    {
+        bail!("--since is newer than --until, so no commit can match");
     }
     let history = repo::load(
         &cli.path,
@@ -142,11 +157,11 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    if let Some(parent) = PathBuf::from(&cli.out).parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("cannot create {}", parent.display()))?;
-        }
+    if let Some(parent) = PathBuf::from(&cli.out).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("cannot create {}", parent.display()))?;
     }
     std::fs::write(&cli.out, &out.svg).with_context(|| format!("cannot write {}", cli.out))?;
     eprintln!(
@@ -237,4 +252,3 @@ mod tests {
         }
     }
 }
-

@@ -5,7 +5,8 @@ use chrono::{DateTime, Datelike, Utc};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
-const FONT: &str = "ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+const FONT: &str =
+    "ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const MONO: &str = "ui-monospace,SFMono-Regular,'Cascadia Code',Menlo,Consolas,monospace";
 const REVEAL: f64 = 82.0;
 const MAX_STEPS: usize = 80;
@@ -97,7 +98,7 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         rule_y,
     };
 
-    let steps = n.min(MAX_STEPS).max(1);
+    let steps = n.clamp(1, MAX_STEPS);
     let bucket = |i: usize| -> usize {
         if n <= 1 || steps <= 1 {
             0
@@ -330,7 +331,10 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         let hidden = seen.len() - shown;
 
         let width_of = |name: &str| 9.0 + 5.6 * name.chars().count() as f64 + 14.0;
-        let mut total: f64 = seen[..shown].iter().map(|(_, name, _)| width_of(name)).sum();
+        let mut total: f64 = seen[..shown]
+            .iter()
+            .map(|(_, name, _)| width_of(name))
+            .sum();
         let more = if hidden > 0 {
             format!("+{hidden} more")
         } else {
@@ -428,10 +432,7 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
 
     let mut header = String::new();
     if o.header {
-        let title = o
-            .title
-            .clone()
-            .unwrap_or_else(|| h.name.clone());
+        let title = o.title.clone().unwrap_or_else(|| h.name.clone());
         let authors = h.authors();
         let range = match h.span() {
             Some((a, b)) => {
@@ -439,7 +440,11 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
                 if from.date_naive() == to.date_naive() {
                     to.format("%b %-d, %Y").to_string()
                 } else {
-                    format!("{} → {}", from.format("%b %-d, %Y"), to.format("%b %-d, %Y"))
+                    format!(
+                        "{} → {}",
+                        from.format("%b %-d, %Y"),
+                        to.format("%b %-d, %Y")
+                    )
                 }
             }
             None => String::new(),
@@ -480,7 +485,15 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         String::new()
     };
 
-    let css = stylesheet(o, &g, steps, &node_steps, &edge_steps, &fade_steps, &bar_steps);
+    let css = stylesheet(
+        o,
+        &g,
+        steps,
+        &node_steps,
+        &edge_steps,
+        &fade_steps,
+        &bar_steps,
+    );
     let label = format!(
         "Commit history of {} — {} commits",
         o.title.clone().unwrap_or_else(|| h.name.clone()),
@@ -754,6 +767,22 @@ fn f(v: f64) -> String {
     }
 }
 
+fn esc(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c if (c as u32) < 0x20 => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -911,20 +940,4 @@ mod tests {
         let mid = norm(50.0, 100.0);
         assert!(mid > 0.0 && mid < 1.0, "got {mid}");
     }
-}
-
-fn esc(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            c if (c as u32) < 0x20 => out.push(' '),
-            c => out.push(c),
-        }
-    }
-    out
 }

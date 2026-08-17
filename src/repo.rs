@@ -125,17 +125,17 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
         }
         let c = repo.find_commit(oid)?;
         let time = c.time().seconds();
-        if let Some(cutoff) = q.since {
-            if time < cutoff {
-                truncated = true;
-                continue;
-            }
+        if let Some(cutoff) = q.since
+            && time < cutoff
+        {
+            truncated = true;
+            continue;
         }
-        if let Some(cutoff) = q.until {
-            if time > cutoff {
-                truncated = true;
-                continue;
-            }
+        if let Some(cutoff) = q.until
+            && time > cutoff
+        {
+            truncated = true;
+            continue;
         }
         let author = c.author();
         let id = oid.to_string();
@@ -224,10 +224,12 @@ fn collect_refs(repo: &Repository) -> HashMap<String, Vec<RefLabel>> {
         let Ok(commit) = r.peel_to_commit() else {
             continue;
         };
-        out.entry(commit.id().to_string()).or_default().push(RefLabel {
-            name: name.to_string(),
-            tag: r.is_tag(),
-        });
+        out.entry(commit.id().to_string())
+            .or_default()
+            .push(RefLabel {
+                name: name.to_string(),
+                tag: r.is_tag(),
+            });
     }
     for v in out.values_mut() {
         v.sort_by(|a, b| b.tag.cmp(&a.tag).then_with(|| a.name.cmp(&b.name)));
