@@ -128,6 +128,12 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if let Some(parent) = PathBuf::from(&cli.out).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("cannot create {}", parent.display()))?;
+        }
+    }
     std::fs::write(&cli.out, &out.svg).with_context(|| format!("cannot write {}", cli.out))?;
     eprintln!(
         "{} · {} commit{} · {} lane{} · {:.0}x{:.0} px · {:.1} kB → {}",
