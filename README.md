@@ -90,6 +90,19 @@ turns the picture into a record of who worked where.
   <img src="docs/authors.svg" alt="the same graph coloured by author" width="100%">
 </p>
 
+## Rendering itself
+
+<p align="center">
+  <img src="docs/self.svg" alt="pulse rendering its own history" width="100%">
+</p>
+
+Two commits on the trunk, a branch that ran for twenty, and the merge that brought it
+back. Note that the branch sits on the top row rather than the trunk, because the top row
+is the busiest lane and the branch outnumbered it: see #3.
+
+CI regenerates this on every run and uploads it as an artifact, so the picture in the
+repository is never the only proof the tool still works.
+
 ## How it reads
 
 The busiest lane is the trunk and sits on the top row. Branches hang below it and rejoin
