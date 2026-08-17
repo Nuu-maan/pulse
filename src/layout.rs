@@ -83,12 +83,12 @@ fn promote_trunk(lane_of: &mut [usize], lanes: usize) {
     for &l in lane_of.iter() {
         counts[l] += 1;
     }
-    let main = counts
-        .iter()
-        .enumerate()
-        .max_by_key(|(_, c)| **c)
-        .map(|(l, _)| l)
-        .unwrap_or(0);
+    let mut main = 0;
+    for (lane, &count) in counts.iter().enumerate() {
+        if count > counts[main] {
+            main = lane;
+        }
+    }
     if main == 0 {
         return;
     }
