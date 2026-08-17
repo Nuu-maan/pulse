@@ -198,3 +198,43 @@ fn parse_time(s: &str) -> Result<i64> {
     Ok(Utc::now().timestamp() - n * secs)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn absolute_dates_parse_as_midnight_utc() {
+        let t = parse_time("2026-01-15").unwrap();
+        let d = chrono::DateTime::from_timestamp(t, 0).unwrap();
+        assert_eq!(d.format("%Y-%m-%d %H:%M").to_string(), "2026-01-15 00:00");
+    }
+
+    #[test]
+    fn relative_spans_count_backwards_from_now() {
+        let now = Utc::now().timestamp();
+        let day = parse_time("1d").unwrap();
+        assert!((now - day - 86_400).abs() <= 2, "one day back");
+
+        let week = parse_time("2w").unwrap();
+        assert!((now - week - 2 * 604_800).abs() <= 2, "two weeks back");
+
+        assert!(parse_time("6mo").unwrap() < parse_time("1mo").unwrap());
+        assert!(parse_time("1y").unwrap() < parse_time("6mo").unwrap());
+    }
+
+    #[test]
+    fn long_unit_names_are_accepted() {
+        let a = parse_time("3days").unwrap();
+        let b = parse_time("3d").unwrap();
+        assert!((a - b).abs() <= 2);
+    }
+
+    #[test]
+    fn nonsense_is_rejected_with_a_message() {
+        for bad in ["", "soon", "12", "3x", "-d", "2026-13-45"] {
+            let err = parse_time(bad).unwrap_err().to_string();
+            assert!(!err.is_empty(), "expected an error for {bad:?}");
+        }
+    }
+}
+
