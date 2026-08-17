@@ -5,7 +5,8 @@ use chrono::{DateTime, Datelike, Utc};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
-const FONT: &str = "ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+const FONT: &str =
+    "ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const MONO: &str = "ui-monospace,SFMono-Regular,'Cascadia Code',Menlo,Consolas,monospace";
 const REVEAL: f64 = 82.0;
 const MAX_STEPS: usize = 80;
@@ -83,9 +84,11 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         graph_bottom + 20.0
     };
 
+    let legend_on = o.color_by == ColorBy::Author && n > 0;
+
     let g = Geometry {
         w,
-        h: rule_y + 26.0,
+        h: rule_y + if legend_on { 42.0 } else { 26.0 },
         pad,
         dx,
         dy,
@@ -95,7 +98,7 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         rule_y,
     };
 
-    let steps = n.min(MAX_STEPS).max(1);
+    let steps = n.clamp(1, MAX_STEPS);
     let bucket = |i: usize| -> usize {
         if n <= 1 || steps <= 1 {
             0
@@ -274,9 +277,11 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
             if used >= budget {
                 break;
             }
-            let Some(text) = h.commits[i].refs.first() else {
+            let Some(label) = h.commits[i].refs.first() else {
                 continue;
             };
+            let text = &label.name;
+            let chip = if label.tag { "tg" } else { "tag" };
             let cx = x(i);
             let tw = 6.1 * text.chars().count() as f64 + 12.0;
             if cx + tw / 2.0 > last_x - 6.0 && last_x.is_finite() {
@@ -297,7 +302,7 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
             let rx = (cx - tw / 2.0).clamp(4.0, (g.w - tw - 4.0).max(4.0));
             let _ = write!(
                 labels,
-                r#"<g class="lbl{anim}"><line class="lead c{c}" x1="{0}" y1="{1}" x2="{0}" y2="{2}"/><rect class="tag c{c}" x="{3}" y="{4}" width="{5}" height="15" rx="4"/><text class="tagt c{c}" x="{6}" y="{7}">{8}</text></g>"#,
+                r#"<g class="lbl{anim}"><line class="lead c{c}" x1="{0}" y1="{1}" x2="{0}" y2="{2}"/><rect class="{chip} c{c}" x="{3}" y="{4}" width="{5}" height="15" rx="4"/><text class="tagt c{c}" x="{6}" y="{7}">{8}</text></g>"#,
                 f(cx),
                 f(ly + 15.0),
                 f(ny - base_r - 1.5),
@@ -311,6 +316,60 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         }
     }
 
+    let mut legend = String::new();
+    if legend_on {
+        let mut seen: Vec<(String, String, usize)> = Vec::new();
+        for c in &h.commits {
+            let key = c.email.to_lowercase();
+            match seen.iter_mut().find(|(k, _, _)| *k == key) {
+                Some((_, _, n)) => *n += 1,
+                None => seen.push((key, c.author.clone(), 1)),
+            }
+        }
+        seen.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
+        let shown = seen.len().min(6);
+        let hidden = seen.len() - shown;
+
+        let width_of = |name: &str| 9.0 + 5.6 * name.chars().count() as f64 + 14.0;
+        let mut total: f64 = seen[..shown]
+            .iter()
+            .map(|(_, name, _)| width_of(name))
+            .sum();
+        let more = if hidden > 0 {
+            format!("+{hidden} more")
+        } else {
+            String::new()
+        };
+        if hidden > 0 {
+            total += 5.6 * more.chars().count() as f64 + 14.0;
+        }
+
+        let mut lx = (g.w - g.pad - total).max(g.pad);
+        let ly = g.rule_y + 30.0;
+        for (key, name, _) in &seen[..shown] {
+            let c = hash(key) % 8;
+            let _ = write!(
+                legend,
+                r#"<circle class="key c{c}" cx="{}" cy="{}" r="3.2"/><text class="keyt" x="{}" y="{}">{}</text>"#,
+                f(lx + 3.5),
+                f(ly - 3.2),
+                f(lx + 10.0),
+                f(ly),
+                esc(name)
+            );
+            lx += width_of(name);
+        }
+        if hidden > 0 {
+            let _ = write!(
+                legend,
+                r#"<text class="keyt muted" x="{}" y="{}">{}</text>"#,
+                f(lx),
+                f(ly),
+                esc(&more)
+            );
+        }
+    }
+
     let mut axis = String::new();
     let _ = write!(
         axis,
@@ -320,6 +379,24 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         f(g.w - g.pad + 10.0),
         f(g.rule_y)
     );
+    let mut taken: Vec<f64> = Vec::new();
+    for (i, gap) in quiet_spells(h) {
+        let cx = x(i) - g.dx / 2.0;
+        if taken.iter().any(|t| (t - cx).abs() < 40.0) {
+            continue;
+        }
+        taken.push(cx);
+        let _ = write!(
+            axis,
+            r#"<line class="gap" x1="{0}" y1="{1}" x2="{0}" y2="{2}"/><text class="axist" x="{0}" y="{3}">{4}</text>"#,
+            f(cx),
+            f(g.top - 12.0),
+            f(g.rule_y),
+            f(g.rule_y + 14.0),
+            esc(&span_label(gap))
+        );
+    }
+
     let mut last_tick = f64::NEG_INFINITY;
     let mut prev: Option<(i32, u32)> = None;
     for i in 0..n {
@@ -332,10 +409,11 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
             continue;
         }
         let cx = x(i);
-        if cx - last_tick < 44.0 {
+        if cx - last_tick < 44.0 || taken.iter().any(|t| (t - cx).abs() < 40.0) {
             continue;
         }
         last_tick = cx;
+        taken.push(cx);
         let label = if dt.month() == 1 {
             dt.format("%b %Y").to_string()
         } else {
@@ -354,10 +432,7 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
 
     let mut header = String::new();
     if o.header {
-        let title = o
-            .title
-            .clone()
-            .unwrap_or_else(|| h.name.clone());
+        let title = o.title.clone().unwrap_or_else(|| h.name.clone());
         let authors = h.authors();
         let range = match h.span() {
             Some((a, b)) => {
@@ -365,7 +440,11 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
                 if from.date_naive() == to.date_naive() {
                     to.format("%b %-d, %Y").to_string()
                 } else {
-                    format!("{} → {}", from.format("%b %-d, %Y"), to.format("%b %-d, %Y"))
+                    format!(
+                        "{} → {}",
+                        from.format("%b %-d, %Y"),
+                        to.format("%b %-d, %Y")
+                    )
                 }
             }
             None => String::new(),
@@ -406,7 +485,15 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         String::new()
     };
 
-    let css = stylesheet(o, &g, steps, &node_steps, &edge_steps, &fade_steps, &bar_steps);
+    let css = stylesheet(
+        o,
+        &g,
+        steps,
+        &node_steps,
+        &edge_steps,
+        &fade_steps,
+        &bar_steps,
+    );
     let label = format!(
         "Commit history of {} — {} commits",
         o.title.clone().unwrap_or_else(|| h.name.clone()),
@@ -414,7 +501,7 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
     );
 
     let svg = format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {hh}" width="{w}" height="{hh}" role="img" aria-label="{label}"><title>{label}</title><style>{css}</style><rect class="bg" width="{w}" height="{hh}" rx="8"/>{axis}{playhead}<g class="wave">{bars}</g><g class="edges">{edges}</g><g class="nodes">{nodes}</g>{labels}{header}</svg>"##,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {hh}" width="{w}" height="{hh}" role="img" aria-label="{label}"><title>{label}</title><style>{css}</style><rect class="bg" width="{w}" height="{hh}" rx="8"/>{axis}{playhead}<g class="wave">{bars}</g><g class="edges">{edges}</g><g class="nodes">{nodes}</g>{labels}{legend}{header}</svg>"##,
         w = f(g.w),
         hh = f(g.h),
         label = esc(&label),
@@ -470,8 +557,12 @@ fn stylesheet(
          .sub{{font-size:11px;fill:var(--muted)}}\
          .branch{{font-family:{MONO};font-size:11px;fill:var(--muted);text-anchor:end}}\
          .axist{{font-size:9px;fill:var(--muted);text-anchor:middle}}\
+         .key{{fill:var(--c)}}\
+         .keyt{{font-size:9.5px;fill:var(--fg)}}\
+         .muted{{fill:var(--muted)}}\
          .rule{{stroke:var(--grid);stroke-width:1}}\
          .tick{{stroke:var(--grid);stroke-width:1;stroke-dasharray:2 4}}\
+         .gap{{stroke:var(--muted);stroke-width:1;stroke-dasharray:1 5;opacity:.5}}\
          .e{{fill:none;stroke:var(--c);stroke-width:1.9;stroke-linecap:round}}\
          .stub{{stroke-dasharray:2 3;opacity:.35}}\
          .n{{fill:var(--c);stroke:var(--bg);stroke-width:var(--nw)}}\
@@ -482,6 +573,7 @@ fn stylesheet(
          .dn{{fill:var(--del);opacity:.85;transform-origin:center top}}\
          .hp{{fill:none;stroke:var(--c);stroke-width:1.6;opacity:0}}\
          .tag{{fill:var(--c);opacity:.14}}\
+         .tg{{fill:none;stroke:var(--c);stroke-width:1;opacity:.5}}\
          .tagt{{font-family:{MONO};font-size:9px;fill:var(--c);text-anchor:middle}}"
     );
 
@@ -567,11 +659,51 @@ fn stylesheet(
         x1 = f(g.w - g.pad)
     );
 
+    let _ = write!(
+        s,
+        "@media(prefers-reduced-motion:reduce){{.n,.e,.lbl,.bar{{animation:none!important}}.ph,.hp{{display:none}}}}"
+    );
+
     s
 }
 
 fn stamp(t: i64) -> DateTime<Utc> {
     DateTime::from_timestamp(t, 0).unwrap_or_default()
+}
+
+fn quiet_spells(h: &History) -> Vec<(usize, i64)> {
+    if h.commits.len() < 4 {
+        return Vec::new();
+    }
+    let gaps: Vec<i64> = h
+        .commits
+        .windows(2)
+        .map(|w| (w[1].time - w[0].time).max(0))
+        .collect();
+    let mut sorted = gaps.clone();
+    sorted.sort_unstable();
+    let median = sorted[sorted.len() / 2].max(1);
+    let floor = (7 * 86_400).max(median * 4);
+
+    let mut out: Vec<(usize, i64)> = gaps
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| **g >= floor)
+        .map(|(i, g)| (i + 1, *g))
+        .collect();
+    out.sort_by_key(|(_, g)| std::cmp::Reverse(*g));
+    out.truncate(8);
+    out
+}
+
+fn span_label(secs: i64) -> String {
+    let days = secs / 86_400;
+    match days {
+        0..=13 => format!("{days}d"),
+        14..=59 => format!("{}w", days / 7),
+        60..=729 => format!("{}mo", days / 30),
+        _ => format!("{}y", days / 365),
+    }
 }
 
 fn churn_cap(h: &History) -> f64 {
@@ -649,4 +781,163 @@ fn esc(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout;
+    use crate::repo::Commit;
+
+    fn history(n: usize) -> History {
+        let commits = (0..n)
+            .map(|i| Commit {
+                id: format!("{i:040}"),
+                short: format!("{i:07}"),
+                parents: if i == 0 {
+                    Vec::new()
+                } else {
+                    vec![format!("{:040}", i - 1)]
+                },
+                author: "Test Person".into(),
+                email: "test@example.com".into(),
+                time: 1_760_000_000 + i as i64 * 86_400,
+                summary: format!("commit {i} <tagged> & \"quoted\""),
+                refs: Vec::new(),
+                ins: 10 + i * 3,
+                del: i,
+            })
+            .collect();
+        History {
+            name: "demo".into(),
+            head: "main".into(),
+            commits,
+            truncated: false,
+            stats: true,
+        }
+    }
+
+    fn options() -> Options {
+        Options {
+            width: 800.0,
+            theme: Theme::Auto,
+            duration: 9.0,
+            once: false,
+            animate: true,
+            color_by: ColorBy::Lane,
+            pulse: true,
+            title: None,
+            header: true,
+            labels: true,
+        }
+    }
+
+    fn render(h: &History, o: &Options) -> String {
+        svg(h, &layout::compute(&h.commits), o).svg
+    }
+
+    #[test]
+    fn the_document_is_self_contained() {
+        let h = history(12);
+        let out = render(&h, &options());
+
+        assert!(out.starts_with("<svg"));
+        assert!(out.ends_with("</svg>"));
+        assert!(!out.contains("<script"));
+        assert!(!out.contains("xlink"));
+        assert!(!out.contains("<image"));
+        assert_eq!(
+            out.matches("http").count(),
+            1,
+            "the only URL may be the SVG namespace"
+        );
+    }
+
+    #[test]
+    fn text_from_the_repository_is_escaped() {
+        let out = render(&history(3), &options());
+        assert!(out.contains("&lt;tagged&gt;"));
+        assert!(out.contains("&amp;"));
+        assert!(!out.contains("<tagged>"));
+    }
+
+    #[test]
+    fn every_commit_gets_a_dot() {
+        let h = history(25);
+        let out = render(&h, &options());
+        assert_eq!(out.matches("<circle class=\"n").count(), 25);
+    }
+
+    #[test]
+    fn a_still_frame_carries_no_animation() {
+        let mut o = options();
+        o.animate = false;
+        let out = render(&history(10), &o);
+        assert!(!out.contains("@keyframes"));
+        assert!(!out.contains("animation"));
+    }
+
+    #[test]
+    fn an_animated_frame_defines_keyframes() {
+        let out = render(&history(10), &options());
+        assert!(out.contains("@keyframes"));
+        assert!(out.contains("prefers-reduced-motion"));
+    }
+
+    #[test]
+    fn the_auto_theme_carries_both_palettes() {
+        let out = render(&history(4), &options());
+        assert!(out.contains("prefers-color-scheme:dark"));
+
+        let mut o = options();
+        o.theme = Theme::Dark;
+        assert!(!render(&history(4), &o).contains("prefers-color-scheme"));
+    }
+
+    #[test]
+    fn geometry_is_always_finite() {
+        for n in [1usize, 2, 7, 140, 600] {
+            let h = history(n);
+            let out = svg(&h, &layout::compute(&h.commits), &options());
+            assert!(out.width.is_finite() && out.width > 0.0, "width for {n}");
+            assert!(out.height.is_finite() && out.height > 0.0, "height for {n}");
+            assert!(!out.svg.contains("NaN"), "NaN in output for {n}");
+            assert!(
+                !out.svg.contains("=\"inf") && !out.svg.contains("infpx"),
+                "infinite coordinate in output for {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn dropping_the_pulse_drops_the_waveform() {
+        let mut o = options();
+        o.pulse = false;
+        let out = render(&history(10), &o);
+        assert!(!out.contains("class=\"bar"));
+    }
+
+    #[test]
+    fn helpers_format_as_expected() {
+        assert_eq!(esc("<a & \"b\">"), "&lt;a &amp; &quot;b&quot;&gt;");
+        assert_eq!(truncate("abcdef", 4), "abc…");
+        assert_eq!(truncate("abc", 4), "abc");
+        assert_eq!(human(999), "999");
+        assert_eq!(human(1500), "1.5k");
+        assert_eq!(human(2_400_000), "2.4M");
+        assert_eq!(span_label(86_400 * 9), "9d");
+        assert_eq!(span_label(86_400 * 21), "3w");
+        assert_eq!(span_label(86_400 * 180), "6mo");
+        assert_eq!(span_label(86_400 * 800), "2y");
+        assert_eq!(f(12.0), "12");
+        assert_eq!(f(12.34), "12.3");
+    }
+
+    #[test]
+    fn churn_normalisation_stays_in_range() {
+        assert_eq!(norm(0.0, 100.0), 0.0);
+        assert_eq!(norm(500.0, 100.0), 1.0);
+        let mid = norm(50.0, 100.0);
+        assert!(mid > 0.0 && mid < 1.0, "got {mid}");
+    }
 }

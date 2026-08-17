@@ -1,7 +1,16 @@
 use anyhow::{Context, Result};
 use git2::{Repository, Sort};
 use std::collections::{HashMap, HashSet};
+use std::io::{IsTerminal, Write};
 use std::path::Path;
+
+const SCAN_LIMIT: usize = 50_000;
+
+#[derive(Clone)]
+pub struct RefLabel {
+    pub name: String,
+    pub tag: bool,
+}
 
 pub struct Commit {
     pub id: String,
@@ -11,7 +20,7 @@ pub struct Commit {
     pub email: String,
     pub time: i64,
     pub summary: String,
-    pub refs: Vec<String>,
+    pub refs: Vec<RefLabel>,
     pub ins: usize,
     pub del: usize,
 }
@@ -27,8 +36,10 @@ pub struct History {
 pub struct Query<'a> {
     pub rev: Option<&'a str>,
     pub all: bool,
+    pub first_parent: bool,
     pub max: usize,
     pub since: Option<i64>,
+    pub until: Option<i64>,
     pub stats: bool,
 }
 
@@ -75,6 +86,9 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
 
     let mut walk = repo.revwalk()?;
     walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
+    if q.first_parent {
+        walk.simplify_first_parent()?;
+    }
     match (q.rev, q.all) {
         (Some(rev), _) => {
             let obj = repo
@@ -83,8 +97,11 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
             walk.push(obj.peel_to_commit()?.id())?;
         }
         (None, true) => {
-            walk.push_glob("refs/heads/*")?;
+            let _ = walk.push_glob("refs/heads/*");
             let _ = walk.push_glob("refs/tags/*");
+            if repo.head().is_ok() {
+                let _ = walk.push_head();
+            }
         }
         (None, false) => {
             if repo.head().is_ok() {
@@ -97,23 +114,38 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
 
     let mut commits = Vec::new();
     let mut truncated = false;
+    let mut scanned = 0usize;
     for oid in walk {
         let oid = oid?;
         if commits.len() >= q.max {
             truncated = true;
             break;
         }
+        scanned += 1;
+        if scanned > SCAN_LIMIT {
+            truncated = true;
+            break;
+        }
         let c = repo.find_commit(oid)?;
         let time = c.time().seconds();
-        if let Some(cutoff) = q.since {
-            if time < cutoff {
-                truncated = true;
-                break;
-            }
+        if let Some(cutoff) = q.since
+            && time < cutoff
+        {
+            truncated = true;
+            continue;
+        }
+        if let Some(cutoff) = q.until
+            && time > cutoff
+        {
+            truncated = true;
+            continue;
         }
         let author = c.author();
         let id = oid.to_string();
         let (ins, del) = if q.stats {
+            if commits.len() % 16 == 0 {
+                progress(commits.len(), q.max);
+            }
             churn_of(&repo, &c).unwrap_or((0, 0))
         } else {
             (0, 0)
@@ -132,6 +164,10 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
         });
     }
 
+    if q.stats {
+        clear_progress();
+    }
+
     if commits.is_empty() {
         anyhow::bail!("no commits found in {}", path.display());
     }
@@ -144,6 +180,22 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
         truncated,
         stats: q.stats,
     })
+}
+
+fn progress(done: usize, total: usize) {
+    if !std::io::stderr().is_terminal() {
+        return;
+    }
+    let _ = write!(std::io::stderr(), "\rreading diffs {done}/{total}");
+    let _ = std::io::stderr().flush();
+}
+
+fn clear_progress() {
+    if !std::io::stderr().is_terminal() {
+        return;
+    }
+    let _ = write!(std::io::stderr(), "\r{:32}\r", "");
+    let _ = std::io::stderr().flush();
 }
 
 fn churn_of(repo: &Repository, c: &git2::Commit) -> Result<(usize, usize)> {
@@ -159,8 +211,8 @@ fn churn_of(repo: &Repository, c: &git2::Commit) -> Result<(usize, usize)> {
     Ok((s.insertions(), s.deletions()))
 }
 
-fn collect_refs(repo: &Repository) -> HashMap<String, Vec<String>> {
-    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+fn collect_refs(repo: &Repository) -> HashMap<String, Vec<RefLabel>> {
+    let mut out: HashMap<String, Vec<RefLabel>> = HashMap::new();
     let Ok(refs) = repo.references() else {
         return out;
     };
@@ -177,11 +229,14 @@ fn collect_refs(repo: &Repository) -> HashMap<String, Vec<String>> {
         };
         out.entry(commit.id().to_string())
             .or_default()
-            .push(name.to_string());
+            .push(RefLabel {
+                name: name.to_string(),
+                tag: r.is_tag(),
+            });
     }
     for v in out.values_mut() {
-        v.sort();
-        v.dedup();
+        v.sort_by(|a, b| b.tag.cmp(&a.tag).then_with(|| a.name.cmp(&b.name)));
+        v.dedup_by(|a, b| a.name == b.name);
         v.truncate(2);
     }
     out
