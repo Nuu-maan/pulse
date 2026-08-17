@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use git2::{Repository, Sort};
 use std::collections::{HashMap, HashSet};
+use std::io::{IsTerminal, Write};
 use std::path::Path;
 
 const SCAN_LIMIT: usize = 50_000;
@@ -139,6 +140,9 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
         let author = c.author();
         let id = oid.to_string();
         let (ins, del) = if q.stats {
+            if commits.len() % 16 == 0 {
+                progress(commits.len(), q.max);
+            }
             churn_of(&repo, &c).unwrap_or((0, 0))
         } else {
             (0, 0)
@@ -157,6 +161,10 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
         });
     }
 
+    if q.stats {
+        clear_progress();
+    }
+
     if commits.is_empty() {
         anyhow::bail!("no commits found in {}", path.display());
     }
@@ -169,6 +177,22 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
         truncated,
         stats: q.stats,
     })
+}
+
+fn progress(done: usize, total: usize) {
+    if !std::io::stderr().is_terminal() {
+        return;
+    }
+    let _ = write!(std::io::stderr(), "\rreading diffs {done}/{total}");
+    let _ = std::io::stderr().flush();
+}
+
+fn clear_progress() {
+    if !std::io::stderr().is_terminal() {
+        return;
+    }
+    let _ = write!(std::io::stderr(), "\r{:32}\r", "");
+    let _ = std::io::stderr().flush();
 }
 
 fn churn_of(repo: &Repository, c: &git2::Commit) -> Result<(usize, usize)> {
