@@ -66,8 +66,10 @@ Regenerate it whenever you like. It is a build artifact, not something you hand 
 | `-o, --out` | Output file, or `-` for stdout. Defaults to `pulse.svg`. |
 | `-n, --max` | How many of the most recent commits to include. Defaults to 140. |
 | `--since` | Only commits newer than this. Accepts `30d`, `6mo`, `2y` or `2026-01-01`. |
+| `--until` | Only commits older than this, same formats as `--since`. |
 | `--rev` | Start from a revision other than HEAD. |
 | `--all` | Include every local branch, not just the current one. |
+| `--first-parent` | Follow only the first parent, hiding commits that arrived by merge. |
 | `--theme` | `auto`, `light` or `dark`. Defaults to `auto`. |
 | `--width` | Target width in pixels. Defaults to 1200. |
 | `-d, --duration` | Length of one loop in seconds. Defaults to 9. |
@@ -93,7 +95,9 @@ turns the picture into a record of who worked where.
 The busiest lane is the trunk and sits on the top row. Branches hang below it and rejoin
 where they merged. A hollow dot is a merge commit. A short dashed tail on the left means
 the parent is older than the window you asked for. Ticks along the bottom mark month
-boundaries. Dots grow with the size of the commit.
+boundaries. Dots grow with the size of the commit. A marker with a duration on it, such
+as `6mo`, is a stretch where nothing was committed at all, which the graph would
+otherwise hide because the horizontal axis counts commits rather than days.
 
 In the waveform, green above the centre line is lines added and red below it is lines
 removed, both measured against the commit's first parent, the same number `git show
@@ -101,8 +105,12 @@ removed, both measured against the commit's first parent, the same number `git s
 than absolute, so the shape is readable whether the repository churns ten lines a day or
 ten thousand.
 
-Every dot carries a `<title>`, so hovering a commit in a browser shows its hash, subject,
-author and diff size.
+Branch names sit in filled chips and tags in outlined ones. Every dot carries a
+`<title>`, so hovering a commit in a browser shows its hash, subject, author and diff
+size.
+
+Readers who have asked their system for reduced motion get the finished graph with no
+animation at all, without you having to generate a second file.
 
 ## Notes
 
@@ -116,6 +124,17 @@ author and diff size.
   repository works fine.
 - The waveform costs one tree diff per commit, which is around two seconds for 175
   commits. `--no-pulse` skips that work entirely if you only want the graph.
+
+## Developing
+
+```
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo fmt --check
+```
+
+CI runs those on Linux, Windows and macOS, then renders this repository's own history and
+asserts the result is a single file with no scripts and no external URLs.
 
 ## Licence
 
