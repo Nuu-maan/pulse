@@ -32,6 +32,7 @@ pub const DARK: Palette = Palette {
     ],
 };
 
+
 impl Palette {
     pub fn vars(&self) -> String {
         let mut s = format!(

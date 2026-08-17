@@ -3,6 +3,12 @@ use git2::{Repository, Sort};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+#[derive(Clone)]
+pub struct RefLabel {
+    pub name: String,
+    pub tag: bool,
+}
+
 pub struct Commit {
     pub id: String,
     pub short: String,
@@ -11,7 +17,7 @@ pub struct Commit {
     pub email: String,
     pub time: i64,
     pub summary: String,
-    pub refs: Vec<String>,
+    pub refs: Vec<RefLabel>,
     pub ins: usize,
     pub del: usize,
 }
@@ -159,8 +165,8 @@ fn churn_of(repo: &Repository, c: &git2::Commit) -> Result<(usize, usize)> {
     Ok((s.insertions(), s.deletions()))
 }
 
-fn collect_refs(repo: &Repository) -> HashMap<String, Vec<String>> {
-    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+fn collect_refs(repo: &Repository) -> HashMap<String, Vec<RefLabel>> {
+    let mut out: HashMap<String, Vec<RefLabel>> = HashMap::new();
     let Ok(refs) = repo.references() else {
         return out;
     };
@@ -175,13 +181,14 @@ fn collect_refs(repo: &Repository) -> HashMap<String, Vec<String>> {
         let Ok(commit) = r.peel_to_commit() else {
             continue;
         };
-        out.entry(commit.id().to_string())
-            .or_default()
-            .push(name.to_string());
+        out.entry(commit.id().to_string()).or_default().push(RefLabel {
+            name: name.to_string(),
+            tag: r.is_tag(),
+        });
     }
     for v in out.values_mut() {
-        v.sort();
-        v.dedup();
+        v.sort_by(|a, b| b.tag.cmp(&a.tag).then_with(|| a.name.cmp(&b.name)));
+        v.dedup_by(|a, b| a.name == b.name);
         v.truncate(2);
     }
     out

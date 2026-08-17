@@ -274,9 +274,11 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
             if used >= budget {
                 break;
             }
-            let Some(text) = h.commits[i].refs.first() else {
+            let Some(label) = h.commits[i].refs.first() else {
                 continue;
             };
+            let text = &label.name;
+            let chip = if label.tag { "tg" } else { "tag" };
             let cx = x(i);
             let tw = 6.1 * text.chars().count() as f64 + 12.0;
             if cx + tw / 2.0 > last_x - 6.0 && last_x.is_finite() {
@@ -297,7 +299,7 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
             let rx = (cx - tw / 2.0).clamp(4.0, (g.w - tw - 4.0).max(4.0));
             let _ = write!(
                 labels,
-                r#"<g class="lbl{anim}"><line class="lead c{c}" x1="{0}" y1="{1}" x2="{0}" y2="{2}"/><rect class="tag c{c}" x="{3}" y="{4}" width="{5}" height="15" rx="4"/><text class="tagt c{c}" x="{6}" y="{7}">{8}</text></g>"#,
+                r#"<g class="lbl{anim}"><line class="lead c{c}" x1="{0}" y1="{1}" x2="{0}" y2="{2}"/><rect class="{chip} c{c}" x="{3}" y="{4}" width="{5}" height="15" rx="4"/><text class="tagt c{c}" x="{6}" y="{7}">{8}</text></g>"#,
                 f(cx),
                 f(ly + 15.0),
                 f(ny - base_r - 1.5),
@@ -482,6 +484,7 @@ fn stylesheet(
          .dn{{fill:var(--del);opacity:.85;transform-origin:center top}}\
          .hp{{fill:none;stroke:var(--c);stroke-width:1.6;opacity:0}}\
          .tag{{fill:var(--c);opacity:.14}}\
+         .tg{{fill:none;stroke:var(--c);stroke-width:1;opacity:.5}}\
          .tagt{{font-family:{MONO};font-size:9px;fill:var(--c);text-anchor:middle}}"
     );
 
