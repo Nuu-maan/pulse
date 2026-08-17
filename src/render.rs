@@ -754,6 +754,165 @@ fn f(v: f64) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout;
+    use crate::repo::Commit;
+
+    fn history(n: usize) -> History {
+        let commits = (0..n)
+            .map(|i| Commit {
+                id: format!("{i:040}"),
+                short: format!("{i:07}"),
+                parents: if i == 0 {
+                    Vec::new()
+                } else {
+                    vec![format!("{:040}", i - 1)]
+                },
+                author: "Test Person".into(),
+                email: "test@example.com".into(),
+                time: 1_760_000_000 + i as i64 * 86_400,
+                summary: format!("commit {i} <tagged> & \"quoted\""),
+                refs: Vec::new(),
+                ins: 10 + i * 3,
+                del: i,
+            })
+            .collect();
+        History {
+            name: "demo".into(),
+            head: "main".into(),
+            commits,
+            truncated: false,
+            stats: true,
+        }
+    }
+
+    fn options() -> Options {
+        Options {
+            width: 800.0,
+            theme: Theme::Auto,
+            duration: 9.0,
+            once: false,
+            animate: true,
+            color_by: ColorBy::Lane,
+            pulse: true,
+            title: None,
+            header: true,
+            labels: true,
+        }
+    }
+
+    fn render(h: &History, o: &Options) -> String {
+        svg(h, &layout::compute(&h.commits), o).svg
+    }
+
+    #[test]
+    fn the_document_is_self_contained() {
+        let h = history(12);
+        let out = render(&h, &options());
+
+        assert!(out.starts_with("<svg"));
+        assert!(out.ends_with("</svg>"));
+        assert!(!out.contains("<script"));
+        assert!(!out.contains("xlink"));
+        assert!(!out.contains("<image"));
+        assert_eq!(
+            out.matches("http").count(),
+            1,
+            "the only URL may be the SVG namespace"
+        );
+    }
+
+    #[test]
+    fn text_from_the_repository_is_escaped() {
+        let out = render(&history(3), &options());
+        assert!(out.contains("&lt;tagged&gt;"));
+        assert!(out.contains("&amp;"));
+        assert!(!out.contains("<tagged>"));
+    }
+
+    #[test]
+    fn every_commit_gets_a_dot() {
+        let h = history(25);
+        let out = render(&h, &options());
+        assert_eq!(out.matches("<circle class=\"n").count(), 25);
+    }
+
+    #[test]
+    fn a_still_frame_carries_no_animation() {
+        let mut o = options();
+        o.animate = false;
+        let out = render(&history(10), &o);
+        assert!(!out.contains("@keyframes"));
+        assert!(!out.contains("animation"));
+    }
+
+    #[test]
+    fn an_animated_frame_defines_keyframes() {
+        let out = render(&history(10), &options());
+        assert!(out.contains("@keyframes"));
+        assert!(out.contains("prefers-reduced-motion"));
+    }
+
+    #[test]
+    fn the_auto_theme_carries_both_palettes() {
+        let out = render(&history(4), &options());
+        assert!(out.contains("prefers-color-scheme:dark"));
+
+        let mut o = options();
+        o.theme = Theme::Dark;
+        assert!(!render(&history(4), &o).contains("prefers-color-scheme"));
+    }
+
+    #[test]
+    fn geometry_is_always_finite() {
+        for n in [1usize, 2, 7, 140, 600] {
+            let h = history(n);
+            let out = svg(&h, &layout::compute(&h.commits), &options());
+            assert!(out.width.is_finite() && out.width > 0.0, "width for {n}");
+            assert!(out.height.is_finite() && out.height > 0.0, "height for {n}");
+            assert!(!out.svg.contains("NaN"), "NaN in output for {n}");
+            assert!(
+                !out.svg.contains("=\"inf") && !out.svg.contains("infpx"),
+                "infinite coordinate in output for {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn dropping_the_pulse_drops_the_waveform() {
+        let mut o = options();
+        o.pulse = false;
+        let out = render(&history(10), &o);
+        assert!(!out.contains("class=\"bar"));
+    }
+
+    #[test]
+    fn helpers_format_as_expected() {
+        assert_eq!(esc("<a & \"b\">"), "&lt;a &amp; &quot;b&quot;&gt;");
+        assert_eq!(truncate("abcdef", 4), "abc…");
+        assert_eq!(truncate("abc", 4), "abc");
+        assert_eq!(human(999), "999");
+        assert_eq!(human(1500), "1.5k");
+        assert_eq!(human(2_400_000), "2.4M");
+        assert_eq!(span_label(86_400 * 9), "9d");
+        assert_eq!(span_label(86_400 * 21), "3w");
+        assert_eq!(span_label(86_400 * 180), "6mo");
+        assert_eq!(span_label(86_400 * 800), "2y");
+        assert_eq!(f(12.0), "12");
+        assert_eq!(f(12.34), "12.3");
+    }
+
+    #[test]
+    fn churn_normalisation_stays_in_range() {
+        assert_eq!(norm(0.0, 100.0), 0.0);
+        assert_eq!(norm(500.0, 100.0), 1.0);
+        let mid = norm(50.0, 100.0);
+        assert!(mid > 0.0 && mid < 1.0, "got {mid}");
+    }
+}
+
 fn esc(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
