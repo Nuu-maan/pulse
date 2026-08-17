@@ -3,6 +3,8 @@ use git2::{Repository, Sort};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+const SCAN_LIMIT: usize = 50_000;
+
 #[derive(Clone)]
 pub struct RefLabel {
     pub name: String,
@@ -103,9 +105,15 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
 
     let mut commits = Vec::new();
     let mut truncated = false;
+    let mut scanned = 0usize;
     for oid in walk {
         let oid = oid?;
         if commits.len() >= q.max {
+            truncated = true;
+            break;
+        }
+        scanned += 1;
+        if scanned > SCAN_LIMIT {
             truncated = true;
             break;
         }
@@ -114,7 +122,7 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
         if let Some(cutoff) = q.since {
             if time < cutoff {
                 truncated = true;
-                break;
+                continue;
             }
         }
         let author = c.author();
