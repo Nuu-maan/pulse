@@ -12,6 +12,8 @@ pub struct Commit {
     pub time: i64,
     pub summary: String,
     pub refs: Vec<String>,
+    pub ins: usize,
+    pub del: usize,
 }
 
 pub struct History {
@@ -19,6 +21,7 @@ pub struct History {
     pub head: String,
     pub commits: Vec<Commit>,
     pub truncated: bool,
+    pub stats: bool,
 }
 
 pub struct Query<'a> {
@@ -26,6 +29,7 @@ pub struct Query<'a> {
     pub all: bool,
     pub max: usize,
     pub since: Option<i64>,
+    pub stats: bool,
 }
 
 impl History {
@@ -41,6 +45,12 @@ impl History {
         let first = self.commits.first()?;
         let last = self.commits.last()?;
         Some((first.time, last.time))
+    }
+
+    pub fn churn(&self) -> (usize, usize) {
+        self.commits
+            .iter()
+            .fold((0, 0), |(i, d), c| (i + c.ins, d + c.del))
     }
 }
 
@@ -103,7 +113,14 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
         }
         let author = c.author();
         let id = oid.to_string();
+        let (ins, del) = if q.stats {
+            churn_of(&repo, &c).unwrap_or((0, 0))
+        } else {
+            (0, 0)
+        };
         commits.push(Commit {
+            ins,
+            del,
             short: id[..7.min(id.len())].to_string(),
             parents: c.parent_ids().map(|p| p.to_string()).collect(),
             author: author.name().unwrap_or("unknown").to_string(),
@@ -125,7 +142,21 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
         head,
         commits,
         truncated,
+        stats: q.stats,
     })
+}
+
+fn churn_of(repo: &Repository, c: &git2::Commit) -> Result<(usize, usize)> {
+    let new_tree = c.tree()?;
+    let old_tree = match c.parent(0) {
+        Ok(p) => Some(p.tree()?),
+        Err(_) => None,
+    };
+    let mut opts = git2::DiffOptions::new();
+    opts.ignore_filemode(true).context_lines(0);
+    let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut opts))?;
+    let s = diff.stats()?;
+    Ok((s.insertions(), s.deletions()))
 }
 
 fn collect_refs(repo: &Repository) -> HashMap<String, Vec<String>> {
@@ -144,12 +175,9 @@ fn collect_refs(repo: &Repository) -> HashMap<String, Vec<String>> {
         let Ok(commit) = r.peel_to_commit() else {
             continue;
         };
-        let label = if r.is_tag() {
-            format!("v {name}")
-        } else {
-            name.to_string()
-        };
-        out.entry(commit.id().to_string()).or_default().push(label);
+        out.entry(commit.id().to_string())
+            .or_default()
+            .push(name.to_string());
     }
     for v in out.values_mut() {
         v.sort();

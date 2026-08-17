@@ -30,6 +30,7 @@ pub struct Options {
     pub once: bool,
     pub animate: bool,
     pub color_by: ColorBy,
+    pub pulse: bool,
     pub title: Option<String>,
     pub header: bool,
     pub labels: bool,
@@ -43,6 +44,8 @@ struct Geometry {
     dy: f64,
     top: f64,
     graph_bottom: f64,
+    band_axis: f64,
+    rule_y: f64,
 }
 
 pub struct Rendered {
@@ -70,16 +73,26 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         380.0
     };
     let graph_bottom = top + (l.lanes.saturating_sub(1)) as f64 * dy;
-    let h_total = graph_bottom + 46.0;
+
+    let band = o.pulse && h.stats && h.commits.iter().any(|c| c.ins + c.del > 0);
+    let band_half = 23.0;
+    let band_axis = graph_bottom + 22.0 + band_half;
+    let rule_y = if band {
+        band_axis + band_half + 14.0
+    } else {
+        graph_bottom + 20.0
+    };
 
     let g = Geometry {
         w,
-        h: h_total,
+        h: rule_y + 26.0,
         pad,
         dx,
         dy,
         top,
         graph_bottom,
+        band_axis,
+        rule_y,
     };
 
     let steps = n.min(MAX_STEPS).max(1);
@@ -152,6 +165,54 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         }
     }
 
+    let cap = churn_cap(h);
+    let weight = |i: usize| -> f64 {
+        if !band {
+            return 0.5;
+        }
+        let c = &h.commits[i];
+        norm((c.ins + c.del) as f64, cap)
+    };
+
+    let mut bars = String::new();
+    let mut bar_steps = BTreeSet::new();
+    if band {
+        let bw = (g.dx * 0.5).clamp(1.6, 9.0);
+        let _ = write!(
+            bars,
+            r#"<line class="rule" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+            f(g.pad - 10.0),
+            f(g.band_axis),
+            f(g.w - g.pad + 10.0),
+            f(g.band_axis)
+        );
+        for i in 0..n {
+            let c = &h.commits[i];
+            if c.ins + c.del == 0 {
+                continue;
+            }
+            let b = bucket(i);
+            bar_steps.insert(b);
+            let bx = x(i) - bw / 2.0;
+            for (v, cls, up) in [(c.ins, "up", true), (c.del, "dn", false)] {
+                if v == 0 {
+                    continue;
+                }
+                let bh = (norm(v as f64, cap) * band_half).max(1.4);
+                let by = if up { g.band_axis - bh } else { g.band_axis };
+                let _ = write!(
+                    bars,
+                    r#"<rect class="bar {cls} bk{b}" x="{}" y="{}" width="{}" height="{}" rx="{}"/>"#,
+                    f(bx),
+                    f(by),
+                    f(bw),
+                    f(bh),
+                    f((bw / 2.5).min(1.6))
+                );
+            }
+        }
+    }
+
     let base_r = if n > 1 {
         (g.dx * 0.30).clamp(2.4, 4.4)
     } else {
@@ -162,12 +223,13 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         let c = color(i);
         let b = bucket(i);
         let merge = h.commits[i].parents.len() > 1;
+        let scaled = base_r * (0.78 + 0.5 * weight(i));
         let r = if merge {
-            base_r + 0.8
+            scaled.max(base_r) + 0.8
         } else if i == n - 1 {
-            base_r + 1.0
+            scaled.max(base_r) + 1.0
         } else {
-            base_r
+            scaled
         };
         let cls = if merge { "n m" } else { "n" };
         let anim = if o.animate {
@@ -178,13 +240,17 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         };
         let _ = write!(
             nodes,
-            r#"<circle class="{cls} c{c}{anim}" cx="{}" cy="{}" r="{}"><title>{} — {} ({})</title></circle>"#,
+            r#"<circle class="{cls} c{c}{anim}" cx="{}" cy="{}" r="{}"><title>{} {} ({}){}</title></circle>"#,
             f(x(i)),
             f(y(l.lane_of[i])),
             f(r),
             esc(&h.commits[i].short),
             esc(&truncate(&h.commits[i].summary, 72)),
-            esc(&h.commits[i].author)
+            esc(&h.commits[i].author),
+            match (h.commits[i].ins, h.commits[i].del) {
+                (0, 0) => String::new(),
+                (a, d) => format!("\n+{} −{}", human(a), human(d)),
+            }
         );
     }
 
@@ -250,9 +316,9 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         axis,
         r#"<line class="rule" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
         f(g.pad - 10.0),
-        f(g.graph_bottom + 20.0),
+        f(g.rule_y),
         f(g.w - g.pad + 10.0),
-        f(g.graph_bottom + 20.0)
+        f(g.rule_y)
     );
     let mut last_tick = f64::NEG_INFINITY;
     let mut prev: Option<(i32, u32)> = None;
@@ -280,8 +346,8 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
             r#"<line class="tick" x1="{0}" y1="{1}" x2="{0}" y2="{2}"/><text class="axist" x="{0}" y="{3}">{4}</text>"#,
             f(cx),
             f(g.top - 12.0),
-            f(g.graph_bottom + 20.0),
-            f(g.graph_bottom + 34.0),
+            f(g.rule_y),
+            f(g.rule_y + 14.0),
             esc(&label)
         );
     }
@@ -304,13 +370,18 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
             }
             None => String::new(),
         };
+        let churn = match h.churn() {
+            (0, 0) => String::new(),
+            (ins, del) => format!(" · +{} −{}", human(ins), human(del)),
+        };
         let sub = format!(
-            "{} commit{}{} · {} author{} · {}",
+            "{} commit{}{} · {} author{}{} · {}",
             n,
             plural(n),
             if h.truncated { " (latest)" } else { "" },
             authors,
             plural(authors),
+            churn,
             range
         );
         let _ = write!(
@@ -335,7 +406,7 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
         String::new()
     };
 
-    let css = stylesheet(o, &g, steps, &node_steps, &edge_steps, &fade_steps);
+    let css = stylesheet(o, &g, steps, &node_steps, &edge_steps, &fade_steps, &bar_steps);
     let label = format!(
         "Commit history of {} — {} commits",
         o.title.clone().unwrap_or_else(|| h.name.clone()),
@@ -343,7 +414,7 @@ pub fn svg(h: &History, l: &Layout, o: &Options) -> Rendered {
     );
 
     let svg = format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {hh}" width="{w}" height="{hh}" role="img" aria-label="{label}"><title>{label}</title><style>{css}</style><rect class="bg" width="{w}" height="{hh}" rx="8"/>{axis}{playhead}<g class="edges">{edges}</g><g class="nodes">{nodes}</g>{labels}{header}</svg>"##,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {hh}" width="{w}" height="{hh}" role="img" aria-label="{label}"><title>{label}</title><style>{css}</style><rect class="bg" width="{w}" height="{hh}" rx="8"/>{axis}{playhead}<g class="wave">{bars}</g><g class="edges">{edges}</g><g class="nodes">{nodes}</g>{labels}{header}</svg>"##,
         w = f(g.w),
         hh = f(g.h),
         label = esc(&label),
@@ -363,6 +434,7 @@ fn stylesheet(
     nodes: &BTreeSet<usize>,
     edges: &BTreeSet<usize>,
     fades: &BTreeSet<usize>,
+    bars: &BTreeSet<usize>,
 ) -> String {
     let mut s = String::new();
 
@@ -405,6 +477,9 @@ fn stylesheet(
          .n{{fill:var(--c);stroke:var(--bg);stroke-width:var(--nw)}}\
          .m{{fill:var(--bg);stroke:var(--c);stroke-width:var(--mw)}}\
          .lead{{stroke:var(--c);stroke-width:1;opacity:.3;stroke-dasharray:2 3}}\
+         .bar{{transform-box:fill-box}}\
+         .up{{fill:var(--add);opacity:.85;transform-origin:center bottom}}\
+         .dn{{fill:var(--del);opacity:.85;transform-origin:center top}}\
          .hp{{fill:none;stroke:var(--c);stroke-width:1.6;opacity:0}}\
          .tag{{fill:var(--c);opacity:.14}}\
          .tagt{{font-family:{MONO};font-size:9px;fill:var(--c);text-anchor:middle}}"
@@ -422,7 +497,7 @@ fn stylesheet(
     let count = if o.once { "1" } else { "infinite" };
     let _ = write!(
         s,
-        ".n,.e,.lbl,.hp,.ph{{animation-duration:{d}s;animation-timing-function:linear;animation-iteration-count:{count};animation-fill-mode:both}}\
+        ".n,.e,.lbl,.hp,.ph,.bar{{animation-duration:{d}s;animation-timing-function:linear;animation-iteration-count:{count};animation-fill-mode:both}}\
          .n,.hp{{transform-box:fill-box;transform-origin:center}}"
     );
 
@@ -459,6 +534,17 @@ fn stylesheet(
         let _ = write!(s, "{}%,100%{{stroke-dashoffset:0}}}}", f(p.max(0.6)));
     }
 
+    for &b in bars {
+        let p = at(b);
+        let a = (p + 2.4).min(99.5);
+        let _ = write!(
+            s,
+            ".bk{b}{{animation-name:bk{b}}}@keyframes bk{b}{{0%,{}%{{opacity:0;transform:scaleY(0)}}{}%,100%{{opacity:.85;transform:scaleY(1)}}}}",
+            f(p),
+            f(a)
+        );
+    }
+
     for &b in fades {
         let p = at(b);
         let a = (p + 3.0).min(99.5);
@@ -486,6 +572,36 @@ fn stylesheet(
 
 fn stamp(t: i64) -> DateTime<Utc> {
     DateTime::from_timestamp(t, 0).unwrap_or_default()
+}
+
+fn churn_cap(h: &History) -> f64 {
+    let mut v: Vec<usize> = h
+        .commits
+        .iter()
+        .flat_map(|c| [c.ins, c.del])
+        .filter(|x| *x > 0)
+        .collect();
+    if v.is_empty() {
+        return 1.0;
+    }
+    v.sort_unstable();
+    let i = ((v.len() as f64 * 0.90) as usize).min(v.len() - 1);
+    (v[i] as f64).max(1.0)
+}
+
+fn norm(v: f64, cap: f64) -> f64 {
+    if v <= 0.0 {
+        return 0.0;
+    }
+    (v / cap).clamp(0.0, 1.0).powf(0.55)
+}
+
+fn human(n: usize) -> String {
+    match n {
+        0..=999 => n.to_string(),
+        1_000..=999_999 => format!("{:.1}k", n as f64 / 1000.0),
+        _ => format!("{:.1}M", n as f64 / 1_000_000.0),
+    }
 }
 
 fn plural(n: usize) -> &'static str {

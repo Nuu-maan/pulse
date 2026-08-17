@@ -52,6 +52,9 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = ColorArg::Lane)]
     color_by: ColorArg,
 
+    #[arg(long, help = "Drop the churn waveform and skip reading diffs")]
+    no_pulse: bool,
+
     #[arg(long, help = "Override the title shown in the header")]
     title: Option<String>,
 
@@ -93,6 +96,7 @@ fn main() -> Result<()> {
             all: cli.all,
             max: cli.max,
             since,
+            stats: !cli.no_pulse,
         },
     )?;
     let layout = layout::compute(&history.commits);
@@ -111,6 +115,7 @@ fn main() -> Result<()> {
             ColorArg::Lane => render::ColorBy::Lane,
             ColorArg::Author => render::ColorBy::Author,
         },
+        pulse: !cli.no_pulse,
         title: cli.title,
         header: !cli.no_header,
         labels: !cli.no_labels,

@@ -12,15 +12,21 @@ matches whichever theme the reader is using. The commit graph draws itself in
 chronological order, branches fork and merge where they really did, and the whole thing
 loops.
 
+Underneath the graph is the pulse the tool is named after: a waveform of what each commit
+actually changed, lines added above the line and lines removed below it. A repository
+with one straight branch still has a shape, and this is it.
+
 ## What you get
 
 - **One file.** A `.svg` you commit next to your code. GitHub renders it inline.
-- **Small.** A 200 commit graph is around 45 KB. The same thing as a GIF is megabytes.
+- **Small.** A 200 commit graph is around 60 KB. The same thing as a GIF is megabytes.
 - **Real topology.** Lanes, forks and merges come from the actual parent links, not a
   decorative squiggle.
+- **A churn waveform.** Every commit is measured against its parent, so the picture says
+  something even when the history is a single line with no branches at all.
 - **Theme aware.** One file, correct on both the light and dark versions of a page.
-- **Honest.** Every dot is a commit, positioned in order, with its hash, subject and
-  author in the tooltip.
+- **Honest.** Every dot is a commit, positioned in order, with its hash, subject, author
+  and diff size in the tooltip.
 
 ## Install
 
@@ -68,6 +74,7 @@ Regenerate it whenever you like. It is a build artifact, not something you hand 
 | `--once` | Play once and hold the finished graph instead of looping. |
 | `--static` | Emit a still frame with no animation at all. |
 | `--color-by` | `lane` or `author`. Defaults to `lane`. |
+| `--no-pulse` | Drop the churn waveform and skip reading diffs, which is faster. |
 | `--title` | Override the name in the header. |
 | `--no-header` | Drop the header block. |
 | `--no-labels` | Drop the branch and tag labels. |
@@ -86,10 +93,16 @@ turns the picture into a record of who worked where.
 The busiest lane is the trunk and sits on the top row. Branches hang below it and rejoin
 where they merged. A hollow dot is a merge commit. A short dashed tail on the left means
 the parent is older than the window you asked for. Ticks along the bottom mark month
-boundaries.
+boundaries. Dots grow with the size of the commit.
 
-Every dot carries a `<title>`, so hovering a commit in a browser shows its hash, subject
-and author.
+In the waveform, green above the centre line is lines added and red below it is lines
+removed, both measured against the commit's first parent, the same number `git show
+--stat` gives you. Bar height is relative to the busiest commits in the window rather
+than absolute, so the shape is readable whether the repository churns ten lines a day or
+ten thousand.
+
+Every dot carries a `<title>`, so hovering a commit in a browser shows its hash, subject,
+author and diff size.
 
 ## Notes
 
@@ -101,6 +114,8 @@ and author.
   places that will not.
 - Reading history is done with libgit2, so no `git` process is spawned and a bare
   repository works fine.
+- The waveform costs one tree diff per commit, which is around two seconds for 175
+  commits. `--no-pulse` skips that work entirely if you only want the graph.
 
 ## Licence
 
