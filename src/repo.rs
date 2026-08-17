@@ -37,6 +37,7 @@ pub struct Query<'a> {
     pub all: bool,
     pub max: usize,
     pub since: Option<i64>,
+    pub until: Option<i64>,
     pub stats: bool,
 }
 
@@ -121,6 +122,12 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
         let time = c.time().seconds();
         if let Some(cutoff) = q.since {
             if time < cutoff {
+                truncated = true;
+                continue;
+            }
+        }
+        if let Some(cutoff) = q.until {
+            if time > cutoff {
                 truncated = true;
                 continue;
             }

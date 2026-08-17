@@ -28,6 +28,9 @@ struct Cli {
     #[arg(long, help = "Only commits newer than this (30d, 6mo, 2y, 2026-01-01)")]
     since: Option<String>,
 
+    #[arg(long, help = "Only commits older than this, same formats as --since")]
+    until: Option<String>,
+
     #[arg(long, help = "Start from this revision instead of HEAD")]
     rev: Option<String>,
 
@@ -88,7 +91,13 @@ fn main() -> Result<()> {
         bail!("--duration must be positive");
     }
 
-    let since = cli.since.as_deref().map(parse_since).transpose()?;
+    let since = cli.since.as_deref().map(parse_time).transpose()?;
+    let until = cli.until.as_deref().map(parse_time).transpose()?;
+    if let (Some(a), Some(b)) = (since, until) {
+        if a > b {
+            bail!("--since is newer than --until, so no commit can match");
+        }
+    }
     let history = repo::load(
         &cli.path,
         &repo::Query {
@@ -96,6 +105,7 @@ fn main() -> Result<()> {
             all: cli.all,
             max: cli.max,
             since,
+            until,
             stats: !cli.no_pulse,
         },
     )?;
@@ -158,7 +168,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn parse_since(s: &str) -> Result<i64> {
+fn parse_time(s: &str) -> Result<i64> {
     if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
         return Ok(d
             .and_hms_opt(0, 0, 0)
@@ -168,18 +178,19 @@ fn parse_since(s: &str) -> Result<i64> {
     }
     let split = s
         .find(|c: char| c.is_ascii_alphabetic())
-        .with_context(|| format!("cannot parse --since {s}"))?;
+        .with_context(|| format!("cannot parse a time from `{s}`"))?;
     let (num, unit) = s.split_at(split);
     let n: i64 = num
         .trim()
         .parse()
-        .with_context(|| format!("cannot parse --since {s}"))?;
+        .with_context(|| format!("cannot parse a time from `{s}`"))?;
     let secs = match unit.trim().to_lowercase().as_str() {
         "d" | "day" | "days" => 86_400,
         "w" | "week" | "weeks" => 604_800,
         "mo" | "month" | "months" => 2_629_800,
         "y" | "year" | "years" => 31_557_600,
-        other => bail!("unknown --since unit `{other}` (use d, w, mo, y or YYYY-MM-DD)"),
+        other => bail!("unknown time unit `{other}` (use d, w, mo, y or YYYY-MM-DD)"),
     };
     Ok(Utc::now().timestamp() - n * secs)
 }
+
