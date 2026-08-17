@@ -37,6 +37,9 @@ struct Cli {
     #[arg(long, help = "Include every local branch, not just HEAD")]
     all: bool,
 
+    #[arg(long, help = "Follow only the first parent, hiding merged-in commits")]
+    first_parent: bool,
+
     #[arg(long, value_enum, default_value_t = ThemeArg::Auto)]
     theme: ThemeArg,
 
@@ -103,6 +106,7 @@ fn main() -> Result<()> {
         &repo::Query {
             rev: cli.rev.as_deref(),
             all: cli.all,
+            first_parent: cli.first_parent,
             max: cli.max,
             since,
             until,

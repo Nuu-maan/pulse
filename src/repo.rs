@@ -35,6 +35,7 @@ pub struct History {
 pub struct Query<'a> {
     pub rev: Option<&'a str>,
     pub all: bool,
+    pub first_parent: bool,
     pub max: usize,
     pub since: Option<i64>,
     pub until: Option<i64>,
@@ -84,6 +85,9 @@ pub fn load(path: &Path, q: &Query) -> Result<History> {
 
     let mut walk = repo.revwalk()?;
     walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
+    if q.first_parent {
+        walk.simplify_first_parent()?;
+    }
     match (q.rev, q.all) {
         (Some(rev), _) => {
             let obj = repo
